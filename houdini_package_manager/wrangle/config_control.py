@@ -33,15 +33,15 @@ class HoudiniManager:
             A dictionary of all the installed versions of Houdini and their data.
     """
 
-    def __init__(self, only_hou_installs=True) -> None:
+    def __init__(self, only_hou_installs: bool = True) -> None:
         self.install_directories = self._get_houdini_paths()
         if only_hou_installs:
             self.install_directories = self.only_houdini_locations()
 
         logging.debug(f"Using these installs:\n{self.install_directories}\n")
-        self.hou_installs = {}
+        self.hou_installs: dict[str, "HoudiniInstall"] = {}
 
-    def get_houdini_data(self, versions: str | list[str] = None) -> None:
+    def get_houdini_data(self, versions: str | list[str] | None = None) -> None:
         """
         Get the package data and relevant meta data for each installed version of Houdini.
         If an install has no package data then the config will simply be empty.
@@ -69,7 +69,7 @@ class HoudiniManager:
         for ver, path in self.install_directories.items():
             self.hou_installs[ver] = HoudiniInstall(path)
 
-    def _get_houdini_paths(self) -> dict:
+    def _get_houdini_paths(self) -> dict[str, Path]:
         """
         Get the locations of Houdini installed software and related software, independent of OS.
         This includes any Houdini version and other components like LicenseServer.
@@ -80,8 +80,10 @@ class HoudiniManager:
         paths = {}
         if opsys == "Windows":
             paths = self._win_registry_values(r"SOFTWARE\Side Effects Software\Houdini")
-        elif opsys == "Darwin" or opsys == "Linux":
-            pass
+        elif opsys == "Darwin":
+            paths = self._get_macos_houdini_paths()
+        elif opsys == "Linux":
+            paths = self._get_linux_houdini_paths()
         else:
             raise Exception("Could not determine operating system.")
 
@@ -96,24 +98,24 @@ class HoudiniManager:
         logging.debug(f"Houdini install paths:\n{paths}\n")
         return paths
 
-    def _win_registry_values(self, key_path: str) -> dict:
+    def _win_registry_values(self, key_path: str) -> dict[str, Path]:
         """
         Get the values of a Windows registry key.
         Paths are converted to pathlib.Path objects.
         """
 
-        import winreg
+        import winreg  # type: ignore[import]
 
         try:
             # Open the registry key
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path)  # type: ignore[attr-defined]
 
             # Iterate over all values in the key
             values = {}
             i = 0
             while True:
                 # Get the name, data, and type of the next value
-                name, data, _ = winreg.EnumValue(key, i)
+                name, data, _ = winreg.EnumValue(key, i)  # type: ignore[attr-defined]
                 name = self._houdini_version_name(name)
                 if isinstance(data, str):
                     data = Path(data)
@@ -125,6 +127,71 @@ class HoudiniManager:
 
         logging.debug(f"Houdini relevant registry keys detected:\n{values}\n")
         return values
+
+    def _get_macos_houdini_paths(self) -> dict[str, Path]:
+        """
+        Get Houdini installation paths on macOS.
+        Houdini on macOS is typically installed in /Applications/Houdini/
+        """
+        paths: dict[str, Path] = {}
+        houdini_dir = Path("/Applications/Houdini")
+
+        if not houdini_dir.exists():
+            logging.debug("/Applications/Houdini directory not found on macOS")
+            return paths
+
+        # Look for Houdini applications
+        try:
+            for item in houdini_dir.iterdir():
+                if item.is_dir() and item.name.startswith("Houdini"):
+                    # Extract version from directory name (e.g., "Houdini19.5.640" -> "19.5.640")
+                    version_match = re.search(r"Houdini(\d+\.\d+\.\d+)", item.name)
+                    if version_match:
+                        version = version_match.group(1)
+                        # Convert to major.minor format (e.g., "19.5.640" -> "19.5")
+                        version_parts = version.split(".")
+                        version_key = f"{version_parts[0]}.{version_parts[1]}"
+                        # On macOS, HFS points to the Resources directory inside the framework
+                        hfs_path = item / "Frameworks" / "Houdini.framework" / "Versions" / "Current" / "Resources"
+                        if hfs_path.exists():
+                            paths[version_key] = hfs_path
+                            logging.debug(f"Found Houdini {version_key} at {hfs_path}")
+        except Exception as e:
+            logging.error(f"Error scanning for Houdini installations on macOS: {e}")
+
+        logging.debug(f"macOS Houdini paths detected:\n{paths}\n")
+        return paths
+
+    def _get_linux_houdini_paths(self) -> dict[str, Path]:
+        """
+        Get Houdini installation paths on Linux.
+        Houdini on Linux is typically installed in /opt/hfs* directories
+        """
+        paths: dict[str, Path] = {}
+        opt_dir = Path("/opt")
+
+        if not opt_dir.exists():
+            logging.debug("/opt directory not found on Linux")
+            return paths
+
+        # Look for Houdini installations in /opt
+        try:
+            for item in opt_dir.iterdir():
+                if item.is_dir() and item.name.startswith("hfs"):
+                    # Extract version from directory name (e.g., "hfs19.5.640" -> "19.5.640")
+                    version_match = re.search(r"hfs(\d+\.\d+\.\d+)", item.name)
+                    if version_match:
+                        version = version_match.group(1)
+                        # Convert to major.minor format (e.g., "19.5.640" -> "19.5")
+                        version_parts = version.split(".")
+                        version_key = f"{version_parts[0]}.{version_parts[1]}"
+                        paths[version_key] = item
+                        logging.debug(f"Found Houdini {version_key} at {item}")
+        except Exception as e:
+            logging.error(f"Error scanning for Houdini installations on Linux: {e}")
+
+        logging.debug(f"Linux Houdini paths detected:\n{paths}\n")
+        return paths
 
     def _houdini_version_name(self, version: str) -> str:
         """
@@ -140,13 +207,13 @@ class HoudiniManager:
         if any(char.isalpha() for char in version):
             return version
 
-        version = version.split(".")
-        new_version = [item for item, bool_val in zip(version, version_components) if bool_val]
-        new_version = ".".join(new_version)
+        version_parts = version.split(".")
+        new_version_list = [item for item, bool_val in zip(version_parts, version_components) if bool_val]
+        new_version = ".".join(new_version_list)
 
         return new_version
 
-    def only_houdini_locations(self) -> dict:
+    def only_houdini_locations(self) -> dict[str, Path]:
         """
         Remove paths that aren't Houdini install locations.
         e.g. This is a Houdini install directory:
@@ -226,7 +293,7 @@ class HoudiniInstall:
         )
         return None
 
-    def _get_env_vars(self) -> list:
+    def _get_env_vars(self) -> dict[str, str]:
         """
         Executes Houdini's hconfig.exe via a Python subprocess in order to get the generated Houdini environment variables (keys and values) that
         hconfig processes from the json package config files.
@@ -291,8 +358,8 @@ class HoudiniInstall:
             # THIS CURRENTLY DOES NOT WORK AS HCONFIG WILL STILL RETURN AN ERROR THINKING IT'S BEING CALLED BY THE
             # WRONG PYTHON VERSION, WHICH MAKES NO SENSE.
 
-            command_main = [
-                python_exe_path,
+            command_main: list[Path | str] = [
+                str(python_exe_path),
                 "-c",
                 (
                     f"import subprocess; result = subprocess.run(['{hconfig_path.as_posix()}'], capture_output=True,"
@@ -300,7 +367,7 @@ class HoudiniInstall:
                 ),
             ]
             result = subprocess.run(
-                command_main, cwd=hconfig_path.parent, shell=False, capture_output=True, text=True
+                [str(c) for c in command_main], cwd=hconfig_path.parent, shell=False, capture_output=True, text=True
             ).stdout
 
             if result:
@@ -320,18 +387,18 @@ class HoudiniInstall:
         hconfig = "hconfig"
         if platform.system() == "Windows":
             hconfig += ".exe"
-        hconfig = Path(self.HB, hconfig)
+        hconfig_path: Path = Path(self.HB, hconfig)
 
         # run hconfig - choose the best method!
-        metadata = _run_with_this_apps_python_naively(hconfig)
+        metadata_list = _run_with_this_apps_python_naively(hconfig_path)
         # metadata = _run_with_compatible_python(hconfig, self.this_houdini_python_version())
 
-        metadata = dict(item.split(" := ") for item in metadata if len(item) > 0)
-        for key, value in metadata.items():  # remove first and last quotes
+        metadata_dict: dict[str, str] = dict(item.split(" := ") for item in metadata_list if len(item) > 0)
+        for key, value in metadata_dict.items():  # remove first and last quotes
             if value[0] in ["'", '"'] and value[-1] in ["'", '"']:
-                metadata[key] = value[1:-1]
+                metadata_dict[key] = value[1:-1]
 
-        return metadata
+        return metadata_dict
 
     def this_houdini_python_version(self) -> Path | None:
         """
@@ -352,7 +419,7 @@ class HoudiniInstall:
         ]
         return installed_pythons[0]
 
-    def pkg_data_as_table_model(self, named=True) -> dict | list:
+    def pkg_data_as_table_model(self, named: bool = True) -> dict[str, dict] | list[list]:
         """
         Get a list or dict of data for all the packages for a single version of Houdini, ordered as defined by the table model.
 
@@ -361,29 +428,39 @@ class HoudiniInstall:
                 Whether or not the returned data should be a dict with the data names as keys or a list of just the values.
                 Default is True.
         """
+        if not self.packages:
+            return {} if named else []
+
         if named:
-            data = {}
+            data: dict[str, dict] = {}
             for name, pkg in self.packages.pkgs.items():
                 data[name] = pkg.table_model
+            return data
         else:
-            data = []
+            data_list: list[list] = []
             for _name, pkg in self.packages.pkgs.items():
-                data.append(list(pkg.table_model.values()))
-        return data
+                data_list.append(list(pkg.table_model.values()))
+            return data_list
 
-    def get_package_warnings(self) -> list[str]:
+    def get_package_warnings(self) -> dict[str, list[str]]:
         """
         Get the warnings for each package.
         """
 
-        data = {}
+        if not self.packages:
+            return {}
+
+        data: dict[str, list[str]] = {}
         for name, pkg in self.packages.pkgs.items():
             data[name] = pkg.warnings
         return data
 
-    def get_labels(self) -> list[str]:
+    def get_labels(self) -> list[str] | None:
+        if not self.packages:
+            return None
         for _, pkg in self.packages.pkgs.items():
             return list(pkg.table_model.keys())
+        return None
 
 
 class HouVersion:
@@ -402,13 +479,29 @@ class HouVersion:
         self.patch = parts[2]
         self.front = self.major + "." + self.minor
 
-    def _extract_version(self, install_path) -> str:
+    def _extract_version(self, install_path: str) -> str:
         """
         Extract the version from the Houdini install path ($HFS).
+        Handles both Windows format (e.g., "Houdini 19.0.917") and
+        macOS/Linux format (e.g., "Houdini19.0.917" or "hfs19.0.917").
         """
+        # For macOS, the path might be long like:
+        # /Applications/Houdini/Houdini21.0.512/Frameworks/Houdini.framework/Versions/Current/Resources
+        # We need to search for the version in the full path, not just the basename
+
+        # Try to find version pattern in full path (e.g., Houdini21.0.512 or hfs21.0.512)
+        version_match = re.search(r"(?:Houdini|hfs)(\d+\.\d+\.\d+)", install_path)
+        if version_match:
+            return version_match.group(1)
+
+        # Fallback to basename parsing for Windows format with space
         ver = os.path.basename(install_path)
-        ver = ver.split(" ")[1]
-        return ver
+        if " " in ver:
+            ver = ver.split(" ")[1]
+            return ver
+
+        # If no version found, return empty string
+        return ""
 
 
 class PackageCollection:
@@ -435,7 +528,9 @@ class PackageCollection:
             version of Houdini.
     """
 
-    def __init__(self, packages_directory: Path = None, env_vars: dict[str, str] = None, get_data=True) -> None:
+    def __init__(
+        self, packages_directory: Path | None = None, env_vars: dict[str, str] | None = None, get_data: bool = True
+    ) -> None:
         if packages_directory and not isinstance(packages_directory, Path):
             raise TypeError("directory must be a pathlib.Path object.")
 
@@ -449,9 +544,9 @@ class PackageCollection:
 
         self.packages_directory = packages_directory
         self.env_vars = env_vars
-        self.hconfig_plugin_paths = []
-        self.pkgs = {}  # Package objects
-        self.package_plugin_matches = {}
+        self.hconfig_plugin_paths: list[Path] = []
+        self.pkgs: dict[str, "Package"] = {}  # Package objects
+        self.package_plugin_matches: dict[str, list[Path]] = {}
 
         self.PACKAGES_GIT_DATA_PATH = UserDataManager().file_path
 
@@ -465,7 +560,7 @@ class PackageCollection:
         return self.packages_directory.parent
 
     @property
-    def houdini_version(self) -> str:
+    def houdini_version(self) -> str | None:
         """
         The version of Houdini in major.minor format.
 
@@ -503,8 +598,8 @@ class PackageCollection:
 
         self.hconfig_plugin_paths = self.extract_plugin_paths_from_HOUDINI_PATH(self.env_vars["HOUDINI_PATH"])
 
-        files = next(os.walk(self.packages_directory))
-        files = [name for name in files[2] if ".json" in name]  # only .json files
+        files_tuple = next(os.walk(self.packages_directory))
+        files = [name for name in files_tuple[2] if ".json" in name]  # only .json files
 
         # create each Package object
         for file in files:
@@ -519,16 +614,18 @@ class PackageCollection:
         Returns a list of pathlib.Path paths that exist.
         """
 
-        plugin_paths = houdini_path.split(";")
-        plugin_paths = [Path(path) for path in plugin_paths]
-        plugin_paths = [path for path in plugin_paths if path.exists()]
+        # Use the correct path separator based on OS (Windows uses ';', Unix-like uses ':')
+        separator = ";" if platform.system() == "Windows" else ":"
+        plugin_path_strs = houdini_path.split(separator)
+        plugin_path_objs = [Path(path) for path in plugin_path_strs]
+        plugin_paths_filtered = [path for path in plugin_path_objs if path.exists()]
 
-        return plugin_paths
+        return plugin_paths_filtered
 
 
 class Package:
     def __init__(
-        self, config_path: Path, hconfig_plugin_paths: list[Path] = None, env_vars: dict[str, str] = None
+        self, config_path: Path, hconfig_plugin_paths: list[Path] | None = None, env_vars: dict[str, str] | None = None
     ) -> None:
         """
         A single JSON package file and its configuration and related data.
@@ -566,11 +663,11 @@ class Package:
 
         self._hconfig_plugin_paths = hconfig_plugin_paths
         self._env_vars = env_vars or {}
-        self._plugin_paths = []
-        self.warnings = []
+        self._plugin_paths: list[Path] = []
+        self.warnings: list[str] = []
 
         self._load()
-        self.config = self._flatten_package(self.config)
+        self.config: list[list] = self._flatten_package(self.config)
 
         self.resolve()
         self.extract_data()
@@ -580,7 +677,7 @@ class Package:
         self._git_project = GitProject(path)
 
     @property
-    def env_vars(self) -> dict:
+    def env_vars(self) -> dict[str, str]:
         """
         The environment variables that apply to all the packages for an installed Houdini version.
         """
@@ -635,7 +732,7 @@ class Package:
         """
         The author of the package.
         """
-        return self._git_project.owner
+        return str(self._git_project.owner) if self._git_project.owner else ""
 
     @property
     def version_latest(self) -> str:
@@ -643,7 +740,7 @@ class Package:
         Latest version of the plugin (git tag version string).
         This is fetched from the remote repo via the GitHub API or a local json file if it already exists.
         """
-        return self._git_project.remote.tag_latest
+        return str(self._git_project.remote.tag_latest) if self._git_project.remote.tag_latest else ""
 
     @property
     def version_installed(self) -> str:
@@ -651,10 +748,10 @@ class Package:
         Installed version of the plugin (git tag version string).
         This is taken from local repo (if a repo exists).
         """
-        return self._git_project.local.tag_latest
+        return str(self._git_project.local.tag_latest) if self._git_project.local.tag_latest else ""
 
     @property
-    def remote_repo_url(self) -> Url:
+    def remote_repo_url(self) -> Url | None:
         """
         The URL of the plugin's remote repository, if it exists.
         """
@@ -727,7 +824,7 @@ class Package:
                 return False
             elif isinstance(enabled, str) and enabled.lower() == "true":
                 return True
-            return enabled
+            return bool(enabled)
         return True
 
     def resolve(self) -> None:
@@ -746,7 +843,7 @@ class Package:
         # use the global env vars to help resolve any variables in the package config
         env_vars = [list(item) for item in self._env_vars.items()]
         merged_config = env_vars + config  # prepend environment variables
-        merged_config = self._resolve_vars(merged_config)
+        self._resolve_vars(merged_config)
         # only get the original package config that is now variable-resolved.
         # no need to do anything: the original list is automatically updated since lists are mutable.
         self.config = config
@@ -779,12 +876,12 @@ class Package:
         if not isinstance(self.config_path, Path):
             raise TypeError("path must be a pathlib.Path object.")
 
-        class JSONPathDecoder(json.JSONDecoder):
+        class JSONPathDecoder(json.JSONDecoder):  # type: ignore[misc]
             """
             Tries to parse invalid json into valid json by accounting for some possible errors.
             """
 
-            def decode(self, s, **kwargs):
+            def decode(self, s: str, **kwargs):  # type: ignore[no-untyped-def,override]
                 regex_replacements = [
                     (re.compile(r"([^\\])\\([^\\])"), r"\1\\\\\2"),  # Fix single backslashes in paths
                     (re.compile(r",(\s*[\]}])"), r"\1"),  # Remove extraneous commas at the end of objects and arrays
@@ -812,7 +909,7 @@ class Package:
         self._raw_json = data
         self.config = data
 
-    def _flatten_package(self, data, prefix=None) -> list:
+    def _flatten_package(self, data: dict | list | str | int | bool, prefix: list | None = None) -> list[list]:
         """
         Recursively traverses a JSON-like data structure and returns a list of paths
         to each value. Each path is structured as its own list where each element is
@@ -871,28 +968,42 @@ class Package:
         end = nums[index:]
         return [start, end]
 
-    def _replace_var_calls(self, data: list[list], var_calls: list, potential_var_names: list) -> list[list]:
+    def _replace_var_calls(  # type: ignore[no-untyped-def]
+        self,
+        data: list[list],
+        var_calls: list,
+        potential_var_names: list,
+        is_variable,
+    ) -> list[list]:
         """
         Continuously replace variable calls with their respective values until no variable calls remain.
         Only replaces var calls if the variable exists to replace it with.
         Catches circular referencing variable calls.
+
+        Args:
+            data: The flattened package config data
+            var_calls: List of variable calls to replace
+            potential_var_names: List of potential variable names
+            is_variable: Function to check if a character is valid in a variable name
         """
 
         # get all var inits
         # structure: [var name, var value, index of var initialization]
-        var_inits = []
-        known_vars = []
-        [known_vars.append(call[0]) for call in var_calls if call[0] not in known_vars]
+        var_inits: list[list] = []
+        known_vars: list[str] = []
+        for call in var_calls:
+            if call[0] not in known_vars:
+                known_vars.append(call[0])
         for i, path in enumerate(data):
             if isinstance(path[-2], str) and path[-2].lower() in known_vars:
-                var_inits.append([path[-2], path[-1], i])
+                var_inits.append([path[-2], str(path[-1]), i])
 
         # replace var calls with var values
         for call, call_i, processed_vars in var_calls:
             # check for circular references
             if call in processed_vars:
                 self.warnings.append(f"Can't process package! Circular reference detected for variable: '{call}'")
-                return
+                return data
             processed_vars.add(call)
 
             # determine which var init to try to get value from first
@@ -906,7 +1017,7 @@ class Package:
 
             # case insensitive replace
             compiled = re.compile(re.escape("$" + call), re.IGNORECASE)
-            data[call_i][-1] = compiled.sub(var[1], data[call_i][-1])
+            data[call_i][-1] = compiled.sub(var[1], str(data[call_i][-1]))
 
             # check if the new value contains variable calls
             new_value = data[call_i][-1]
@@ -914,11 +1025,11 @@ class Package:
                 new_var_calls = [
                     [call, call_i, processed_vars.copy()]
                     for call in (
-                        "".join(takewhile(str.isidentifier, call.lower())) for call in new_value.split("$")[1:]
+                        "".join(takewhile(is_variable, call.lower())) for call in str(new_value).split("$")[1:]
                     )
                     if call and call in potential_var_names
                 ]
-                self._replace_var_calls(data, new_var_calls, potential_var_names)
+                self._replace_var_calls(data, new_var_calls, potential_var_names, is_variable)
 
         return data
 
@@ -951,37 +1062,33 @@ class Package:
         while True:
             # get list of potential variables
             potential_var_names = []
-            [
-                potential_var_names.append(path[-2].lower())
-                for path in config
-                if isinstance(path[-2], str) and len(path) >= 2 and path[-2].lower() not in potential_var_names
-            ]
+            for path in config:
+                if isinstance(path[-2], str) and len(path) >= 2 and path[-2].lower() not in potential_var_names:
+                    potential_var_names.append(path[-2].lower())
 
             # find and extract variable calls
-            var_calls = []
+            var_calls: list[list] = []
             for i, path in enumerate(config):
                 if isinstance(path[-1], str) and "$" in path[-1]:
-                    var_calls.extend(
-                        [call, i, set()]
-                        for call in ("".join(takewhile(is_variable, call.lower())) for call in path[-1].split("$")[1:])
-                        if call and call in potential_var_names
-                    )
+                    for call in ("".join(takewhile(is_variable, call.lower())) for call in path[-1].split("$")[1:]):
+                        if call and call in potential_var_names:
+                            var_calls.append([call, i, set()])
 
             # break the loop if no more variable calls are found or there are errors with the package that can't be parsed
             if not var_calls or self.warnings:
                 break
 
-            config = self._replace_var_calls(config, var_calls, potential_var_names)
+            config = self._replace_var_calls(config, var_calls, potential_var_names, is_variable)
 
-        return config
+        return None
 
-    def _find_plugin_paths(self, paths: list[list]) -> list[str]:
+    def _find_plugin_paths(self, paths: list[list]) -> list[Path]:
         """
         Find all the plugin paths in the package.
         Returns a list of all the valid paths.
         """
 
-        def split_paths(string: str) -> list:
+        def split_paths(string: str) -> list[str]:
             """
             Split a combined string of multiple paths into individual paths.
             Removes trailing separators.
@@ -990,29 +1097,34 @@ class Package:
             if not string:
                 return []
 
-            if string[-2:] == ";&":
+            # Use correct separator based on OS (Windows uses ';', Unix-like uses ':')
+            separator = ";" if platform.system() == "Windows" else ":"
+
+            # Remove trailing separators with '&'
+            if string[-2:] == f"{separator}&":
                 string = string[:-2]
-            elif string[-1] == ";":
+            elif string[-1] == separator:
                 string = string[:-1]
-            string = string.split(";")
-            return string
+            result: list[str] = string.split(separator)
+            return result
 
         # locate HOUDINI_PATH
         # Need to look for "path" (legacy of HOUDINI_PATH) as well since our manual reading of
         # the package config does not cause any paths in "path" to be automatically merged into HOUDINI_PATH,
         # as apposed to when packages are read by hconfig
         # HOUDINI_PATH or "path" can be anywhere in the chain, not only just [-2]
-        paths = [path for path in paths if "HOUDINI_PATH" in path or "path" in path or "hpath" in path]
-        paths = [path for path in paths if isinstance(path[-1], str)]
-        new_paths = []
-        [new_paths.extend(split_paths(path[-1])) for path in paths]
-        paths = new_paths
+        filtered = [path for path in paths if "HOUDINI_PATH" in path or "path" in path or "hpath" in path]
+        filtered = [path for path in filtered if isinstance(path[-1], str)]
+        str_paths: list[str] = []
+        for path_item in filtered:
+            str_paths.extend(split_paths(str(path_item[-1])))
 
         # remove duplicate paths
-        new_paths = []
-        [new_paths.extend([path]) for path in paths if path not in new_paths]
-        paths = new_paths
+        unique_paths: list[str] = []
+        for path_str in str_paths:
+            if path_str not in unique_paths:
+                unique_paths.append(path_str)
 
-        paths = [Path(path) for path in paths]
-        paths = [path for path in paths if path.exists()]
-        return paths
+        path_objs = [Path(path) for path in unique_paths]
+        existing_paths = [path for path in path_objs if path.exists()]
+        return existing_paths

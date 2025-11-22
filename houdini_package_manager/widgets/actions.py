@@ -11,17 +11,18 @@ class Actions:
     Various actions that can be performed by widgets.
     """
 
-    def open_path(path):
+    @staticmethod
+    def open_path(path: Path | str) -> None:
         """
         Get the path that is associated with a button and open it.
         """
 
-        if not isinstance(path, Path):
-            path = Path(path)
+        path_obj: Path
+        path_obj = Path(path) if not isinstance(path, Path) else path
 
-        if not path.exists():
-            StatusBar.message(f"Failed to open: {str(path)}")
+        if not path_obj.exists():
+            StatusBar.message(f"Failed to open: {str(path_obj)}")
             return
 
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
-        StatusBar.message(f"Opened: {path}")
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path_obj)))
+        StatusBar.message(f"Opened: {path_obj}")

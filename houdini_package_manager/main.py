@@ -10,7 +10,7 @@ from houdini_package_manager.widgets.main_window import MainWindow
 from houdini_package_manager.wrangle.config_control import HoudiniManager
 
 
-def main(start: bool = True, headless: bool = False) -> QApplication:
+def main(start: bool = True, headless: bool = False) -> QApplication | None:
     """Start the Houdini package manager app
 
     Create and open the Houdini package manager window
@@ -41,7 +41,7 @@ def main(start: bool = True, headless: bool = False) -> QApplication:
             " Houdini being installed to work."
         )
         dialog_missing_houdini.exec()
-        return
+        return None
 
     window = MainWindow(app, houdini_data)
 
@@ -57,7 +57,7 @@ def main(start: bool = True, headless: bool = False) -> QApplication:
     return app
 
 
-def show_updater():
+def show_updater() -> None:
     """
     Show the version update dialog.
     """

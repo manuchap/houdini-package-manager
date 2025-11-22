@@ -26,8 +26,8 @@ class Url:
         """
 
         s = self.__str__()
-        s = s.split("/")
-        stem = s[-1]
-        stem = stem.split(".")
-        stem = stem[0]
-        return stem
+        parts: list[str] = s.split("/")
+        stem = parts[-1]
+        stem_parts: list[str] = stem.split(".")
+        stem_final = stem_parts[0]
+        return stem_final

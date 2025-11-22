@@ -170,3 +170,5 @@ houdini_package_manager/widgets/widget_testing.py
 # houpm website
 node_modules
 /docs/dist_hpm
+
+.DS_Store

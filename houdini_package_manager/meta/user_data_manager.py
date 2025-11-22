@@ -27,7 +27,7 @@ class UserDataManager:
     - use 'from dataclasses import dataclass, field' to maintain structured data when reading/writing json
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.file_path = self.get_user_data_path(HPMPathsEnum.PACKAGE_REPO_DATA.value)
 
     def get_user_data_path(self, filename: str) -> Path:
@@ -36,17 +36,21 @@ class UserDataManager:
         The file will be created if it doesn't exist.
         """
 
+        base_path: str
         if platform.system() == "Windows":
             base = os.getenv("APPDATA")
+            if base is None:
+                base = os.path.expanduser("~")
+            base_path = base
         elif platform.system() == "Darwin":
-            base = os.path.expanduser("~/Library/Application Support")
+            base_path = os.path.expanduser("~/Library/Application Support")
         else:
-            base = os.path.expanduser("~/.local/share")
-        data_dir = Path(base) / "HoudiniPackageManager"
+            base_path = os.path.expanduser("~/.local/share")
+        data_dir = Path(base_path) / "HoudiniPackageManager"
         data_dir.mkdir(parents=True, exist_ok=True)
         return data_dir / filename
 
-    def _read_data(self) -> dict:
+    def _read_data(self) -> dict[str, dict[str, str | list[str]]]:
         """
         Reads data from the JSON file.
 
@@ -55,12 +59,13 @@ class UserDataManager:
 
         if self.file_path.exists():
             with open(self.file_path) as file:
-                return json.load(file)
+                data: dict[str, dict[str, str | list[str]]] = json.load(file)
+                return data
         else:
             self.new_empty_file()
             return {}
 
-    def _write_data(self, data) -> None:
+    def _write_data(self, data: dict[str, dict[str, str | list[str]]]) -> None:
         """Writes the given data to the JSON file."""
         with open(self.file_path, "w") as file:
             json.dump(data, file, indent=4)
@@ -71,7 +76,7 @@ class UserDataManager:
     #     data[tool_name] = {"local_config_path": local_config_path, "tags": []}
     #     self._write_data(data)
 
-    def update_tags(self, tool_name, tags) -> None:
+    def update_tags(self, tool_name: str, tags: list[str]) -> None:
         """Updates the tags for a specific tool."""
         data = self._read_data()
         if tool_name not in data:
@@ -80,10 +85,10 @@ class UserDataManager:
         data[tool_name]["tags"] = tags
         self._write_data(data)
 
-    def get_entry(self, tool_name) -> dict | None:
+    def get_entry(self, tool_name: str | None) -> dict[str, str | list[str]] | None:
         """Retrieves the entry for a specific tool."""
         if not tool_name:
-            return
+            return None
 
         data = self._read_data()
         if tool_name in data:
@@ -92,7 +97,7 @@ class UserDataManager:
             logging.debug(f"User data cache for plugin '{tool_name}' does not exist.")
             return None
 
-    def set_file_path(self, file_path):
+    def set_file_path(self, file_path: Path) -> None:
         """Sets or changes the file path for the JSON data file."""
         self.file_path = file_path
 

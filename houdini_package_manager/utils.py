@@ -17,15 +17,15 @@ def _base_path() -> Path:
     return base_path
 
 
-def epath(path: str, string=False) -> Path:
+def epath(path: str, string: bool = False) -> Path | str:
     """
     Combine the base path and a given relative path to produce a complete environment path.
     Returns a Path by default. Returns a string if string arg is True.
     """
 
-    path = Path(_base_path(), path)
+    result_path: Path = Path(_base_path(), path)
 
     if string:
-        return str(path)
+        return str(result_path)
 
-    return path
+    return result_path
